@@ -3,7 +3,8 @@
 -- Engine: PostgreSQL (Supabase)
 -- Author: Fleet Foodies Engineering
 -- Description: Core schema, data imports, constraint configurations, and 
---              automated business rules (Variety Shield, 3-Strike Rule, & Document Compliance).
+--              automated business rules (Variety Shield, 3-Strike Rule, 
+--              Document Compliance, & HITL Verification).
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -19,7 +20,7 @@ CREATE TABLE IF NOT EXISTS communities (
     zone VARCHAR(20) NOT NULL
 );
 
--- Table 2: Food Trucks (Vendor Entity with Compliance Tracking)
+-- Table 2: Food Trucks (Vendor Entity with Compliance & HITL Tracking)
 CREATE TABLE IF NOT EXISTS food_trucks (
     id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     truck_name VARCHAR(100) NOT NULL,
@@ -29,12 +30,106 @@ CREATE TABLE IF NOT EXISTS food_trucks (
     strikes INT DEFAULT 0,
     coi_expires_at DATE,
     health_permit_expires_at DATE,
-    documents_verified BOOLEAN DEFAULT FALSE
+    documents_verified BOOLEAN DEFAULT FALSE,
+    verified_by_user_id VARCHAR(50),
+    verified_at TIMESTAMP,
+    compliance_notes TEXT
 );
 
 -- Table 3: Schedules (Junction / Bridge Entity)
 CREATE TABLE IF NOT EXISTS schedules (
     id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    community_id BIGINT REFERENCES communities(id) ON DELETE CASCADE,
+    food_truck_id BIGINT REFERENCES food_trucks(id) ON DELETE CASCADE,
+    service_date DATE NOT NULL,
+    booking_status VARCHAR(20) DEFAULT 'Scheduled'
+);
+
+-- ----------------------------------------------------------------------------
+-- 2. SAMPLE DATA INSERTION
+-- ----------------------------------------------------------------------------
+
+-- Insert Communities
+INSERT INTO communities (community_name, address, city_state_zip, zone)
+VALUES 
+    ('Abrazo at Rice Hope', '100 Rice Hope Loop', 'Port Wentworth, GA 31407', 'Zone 1'),
+    ('Savannah Quarters', '200 Blue Moon Crossing', 'Pooler, GA 31322', 'Zone 2');
+
+-- Insert Food Trucks (Demonstrating Compliance States & HITL Audits)
+INSERT INTO food_trucks (
+    truck_name, cuisine_type, tier, fto_status, strikes, 
+    coi_expires_at, health_permit_expires_at, documents_verified, 
+    verified_by_user_id, verified_at, compliance_notes
+)
+VALUES 
+    (
+        'Pie Society / British Pie Co.', 'British / Bakery', 'Tier 1', 'Active', 0, 
+        '2027-12-31', '2027-12-31', TRUE, 
+        'usr_ops_mgr_01', CURRENT_TIMESTAMP - INTERVAL '10 days', 'All state and insurance docs verified.'
+    ),
+    (
+        'BowTie Barbecue Co.', 'BBQ', 'Tier 1', 'Active', 0, 
+        '2025-01-01', '2027-12-31', TRUE, 
+        'usr_ops_mgr_01', CURRENT_TIMESTAMP - INTERVAL '30 days', 'Expired COI needs re-audit.'
+    ),
+    (
+        'Def Burger', 'American / Burgers', 'Tier 1', 'Suspended', 3, 
+        '2027-12-31', '2027-12-31', FALSE, 
+        NULL, NULL, 'Pending manual compliance audit.'
+    );
+
+-- Insert Historical & Active Schedules
+INSERT INTO schedules (community_id, food_truck_id, service_date, booking_status)
+VALUES 
+    (1, 1, CURRENT_DATE - INTERVAL '7 days', 'Completed'),   -- Variety Shield Trigger
+    (1, 2, CURRENT_DATE - INTERVAL '26 days', 'Completed'),  -- Cooldown Expired
+    (2, 1, CURRENT_DATE + INTERVAL '14 days', 'Scheduled');
+
+-- ----------------------------------------------------------------------------
+-- 3. BUSINESS RULES ENGINE (FULL GOVERNANCE & HITL AUDIT)
+-- ----------------------------------------------------------------------------
+
+-- Unified Vendor Eligibility Audit
+-- Evaluates: 1) Strike Penalties, 2) HITL Verification, 3) Document Expiration, 4) Variety Shield
+SELECT 
+    ft.id AS truck_id,
+    ft.truck_name,
+    ft.cuisine_type,
+    ft.strikes,
+    ft.fto_status,
+    ft.coi_expires_at,
+    ft.documents_verified,
+    ft.verified_by_user_id,
+    CASE 
+        -- Guardrail 1: Strike Suspension Check
+        WHEN ft.fto_status = 'Suspended' OR ft.strikes >= 3 
+            THEN 'REJECTED: Account Suspended (3+ Strikes)'
+        
+        -- Guardrail 2: Human-in-the-Loop (HITL) Document Verification
+        WHEN ft.documents_verified = FALSE 
+            THEN 'REJECTED: Compliance Pending Human Review (HITL Verification Required)'
+        
+        -- Guardrail 3: Document Expiration Check
+        WHEN ft.coi_expires_at IS NULL OR ft.coi_expires_at < CURRENT_DATE 
+            THEN 'REJECTED: Certificate of Insurance (COI) Expired or Missing'
+        
+        WHEN ft.health_permit_expires_at IS NULL OR ft.health_permit_expires_at < CURRENT_DATE 
+            THEN 'REJECTED: Health Permit Expired or Missing'
+
+        -- Guardrail 4: Variety Shield Check (14-Day Cooldown)
+        WHEN EXISTS (
+            SELECT 1 
+            FROM schedules s 
+            WHERE s.food_truck_id = ft.id 
+              AND s.community_id = 1 
+              AND s.service_date >= (CURRENT_DATE - INTERVAL '14 days')
+        ) THEN 'REJECTED: Variety Shield Active (Served within 14 Days)'
+        
+        -- Default: Cleared for Booking
+        ELSE 'APPROVED: Eligible for Booking'
+    END AS booking_decision
+FROM food_trucks ft
+ORDER BY ft.id ASC;    id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     community_id BIGINT REFERENCES communities(id) ON DELETE CASCADE,
     food_truck_id BIGINT REFERENCES food_trucks(id) ON DELETE CASCADE,
     service_date DATE NOT NULL,
