@@ -1,16 +1,13 @@
-# Fleet Foodies — Relational Database & Business Rules Engine
+# Fleet Foodies — Fleet Scheduling & Governance Engine
 
 ## Overview
-Engineered a production-grade relational database schema on PostgreSQL (Supabase) to govern property zones, vendor operations, and automated booking governance for **Fleet Foodies**.
+Engineered a relational PostgreSQL database schema, automated PL/pgSQL governance triggers, and scheduling rules in Supabase to manage multi-vendor logistics, enforce location cooldown schedules, and manage vendor compliance.
 
-## Architecture & Schema
-* **`communities`**: Tracks property locations, addresses, and zone designations.
-* **`food_trucks`**: Stores vendor profiles, cuisine types, strike penalties, operational statuses (`Active`, `Suspended`), and compliance verification audit trails.
-* **`schedules`**: Serves as a junction table connecting communities and vendors with specific service dates and statuses.
+## Key Features & Operations Logic
+* **Logistics & Scheduling Architecture**: Relational models linking vendors, office park / event locations, and recurring meal service allocations.
+* **Automated 3-Strike Governance Engine**: PL/pgSQL trigger (`process_vendor_strike_governance()`) automatically calculates strikes upon violation entries and updates vendor statuses (`Active` $\rightarrow$ `Probation` $\rightarrow$ `Suspended`).
+* **Variety Shield Cooldown Tracking**: Data structures preventing menu fatigue by tracking vendor location history.
+* **Row Level Security (RLS)**: PostgreSQL access policies securing internal vendor contact details and strike audit logs.
 
-## Key Business Logic & Guardrails
-* **Human-in-the-Loop (HITL) Compliance Engine**: Enforces manual Ops review (`verified_by_user_id`, `verified_at`, `documents_verified`) before a vendor can be booked.
-* **Document Compliance Guardrails**: Automatically blocks scheduling if a vendor's Certificate of Insurance (`coi_expires_at`) or Health Permit is expired or unverified.
-* **Variety Shield (14-Day Cooldown)**: Uses date arithmetic (`INTERVAL '14 days'`) to block vendors from repeat bookings at the same community within 14 days, preventing menu burnout.
-* **Three-Strike Governance**: Automatically flags and suspends vendors (`fto_status = 'Suspended'`) when operational infractions hit 3 strikes.
-* **Unified Eligibility Audit**: Executes complex multi-table JOINs, subqueries, and conditional `CASE` logic to output real-time `APPROVED` vs `REJECTED` booking decisions.
+## Repository Structure
+* `schema.sql` — PostgreSQL DDL scripts, procedural governance triggers, RLS policies, and sample logistics data.
